@@ -1,0 +1,266 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+
+
+// ============================================================================
+// Schema do sistema de Estoque + Caixa (multi-tenant)
+// ============================================================================
+
+  generator client {
+    provider = "prisma-client-js"
+  }
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================================================
+// TENANT (empresa/loja assinante) — base do modelo multi-tenant
+// ============================================================================
+    
+model Tenant {
+  id        String   @id @default(uuid())
+  name      String // Nome da loja/doceria
+  slug      String   @unique // usado em URLs e subdomínios futuros (ex: docediana.app.com)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Configurações simples do tenant (moeda, timezone etc). JSON pra não precisar migration a cada nova config.
+  settings Json @default("{}")
+
+  users           User[]
+  products        Product[]
+  categories      Category[]
+  stockMovements  StockMovement[]
+  sales           Sale[]
+  paymentMethods  PaymentMethodConfig[]
+
+  @@map("tenants")
+}
+
+// ============================================================================
+// USUÁRIOS E AUTENTICAÇÃO
+// ============================================================================
+
+enum UserRole {
+  ADMIN // acesso total dentro do tenant
+  OPERATOR // opera o caixa, cadastra produtos, sem acesso a configs sensíveis
+}
+
+model User {
+  id           String   @id @default(uuid())
+  tenantId     String
+  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  name         String
+  email        String
+  passwordHash String
+  role         UserRole @default(OPERATOR)
+  active       Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  stockMovements StockMovement[] // quem fez cada movimentação
+  sales          Sale[] // quem fechou cada venda
+
+  // Email único por tenant (não globalmente — permite mesmo email em lojas diferentes se quiser)
+  @@unique([tenantId, email])
+  @@index([tenantId])
+  @@map("users")
+} 
+
+// ============================================================================
+// CATEGORIAS DE PRODUTO
+// ============================================================================
+
+model Category {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  name String // ex: "Bolos", "Doces finos", "Bebidas"
+
+  products Product[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@map("categories")
+}
+
+// ============================================================================
+// PRODUTOS
+// ============================================================================
+
+model Product {
+  id         String    @id @default(uuid())
+  tenantId   String
+  tenant     Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  categoryId String?
+  category   Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  name        String
+  sku         String? // código interno opcional (código de barras, referência)
+  price       Decimal  @db.Decimal(10, 2) // preço de venda
+  costPrice   Decimal? @db.Decimal(10, 2) // preço de custo (opcional, útil pra margem no futuro)
+  quantity    Int      @default(0) // saldo atual em estoque — é a "foto" atual, StockMovement é o histórico
+  minQuantity Int      @default(0) // estoque mínimo, pra alertas futuros
+  unit        String   @default("un") // un, kg, g, l, ml etc
+
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  stockMovements StockMovement[]
+  saleItems      SaleItem[]
+
+  @@unique([tenantId, sku])
+  @@index([tenantId])
+  @@index([tenantId, active])
+  @@map("products")
+}
+
+// ============================================================================
+// MOVIMENTAÇÕES DE ESTOQUE (histórico — a fonte da verdade)
+// ============================================================================
+// Toda entrada/saída de produto gera um registro aqui. O campo `quantity`
+// em Product é sempre recalculado a partir dessas movimentações (nunca
+// editado diretamente por fora desse fluxo).
+
+enum StockMovementType {
+  ENTRY // entrada manual (compra, reposição, ajuste positivo)
+  EXIT // saída manual (perda, quebra, ajuste negativo — NÃO é venda)
+  SALE // saída gerada automaticamente por uma venda no caixa
+  SALE_CANCELLATION // estorno de estoque por cancelamento de venda
+}
+
+model StockMovement {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  userId String? // quem fez a movimentação (null se veio de processo automático)
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  type     StockMovementType
+  quantity Int // sempre positivo — o `type` define se soma ou subtrai
+  reason   String? // observação livre ("compra fornecedor X", "produto vencido")
+
+  // referência à venda de origem, quando type = SALE ou SALE_CANCELLATION
+  saleId String?
+  sale   Sale?   @relation(fields: [saleId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, productId])
+  @@index([tenantId, createdAt])
+  @@map("stock_movements")
+}
+
+// ============================================================================
+// FORMAS DE PAGAMENTO (configurável por tenant)
+// ============================================================================
+// Em vez de enum fixo, cada tenant pode ativar/nomear suas formas de
+// pagamento — já pensando em generalizar pra outros tipos de negócio.
+
+model PaymentMethodConfig {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  name   String // "Dinheiro", "Pix", "Cartão de débito", "Cartão de crédito"
+  active Boolean @default(true)
+
+  salePayments SalePayment[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@map("payment_method_configs")
+}
+
+// ============================================================================
+// VENDAS (CAIXA)
+// ============================================================================
+
+enum SaleStatus {
+  COMPLETED
+  CANCELLED
+}
+
+model Sale {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  userId String // operador que fechou a venda
+  user   User   @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  // ID gerado NO CLIENTE (front) no momento em que a venda é fechada offline.
+  // É a chave de idempotência: se o front reenviar a mesma venda (retry de
+  // sincronização), o backend identifica pelo clientGeneratedId e não duplica.
+  clientGeneratedId String @unique
+
+  total       Decimal @db.Decimal(10, 2) // soma dos itens
+  amountPaid  Decimal @db.Decimal(10, 2) // valor recebido do cliente
+  changeGiven Decimal @db.Decimal(10, 2) @default(0) // troco calculado
+
+  status SaleStatus @default(COMPLETED)
+
+  // timestamp de quando a venda foi FECHADA NO CAIXA (pode ser antes do
+  // createdAt, que é quando chegou no servidor, se veio de sync offline)
+  soldAt DateTime @default(now())
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items          SaleItem[]
+  payments       SalePayment[]
+  stockMovements StockMovement[]
+
+  @@index([tenantId])
+  @@index([tenantId, soldAt])
+  @@map("sales")
+}
+
+// Itens de uma venda — guarda o preço unitário NO MOMENTO da venda
+// (nunca deve puxar o preço atual do produto, que pode ter mudado depois)
+model SaleItem {
+  id     String @id @default(uuid())
+  saleId String
+  sale   Sale   @relation(fields: [saleId], references: [id], onDelete: Cascade)
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  quantity    Int
+  unitPrice   Decimal @db.Decimal(10, 2) // preço no momento da venda
+  totalPrice  Decimal @db.Decimal(10, 2) // quantity * unitPrice
+
+  @@index([saleId])
+  @@index([productId])
+  @@map("sale_items")
+}
+
+// Uma venda pode ter mais de uma forma de pagamento (ex: parte no pix, parte em dinheiro)
+model SalePayment {
+  id     String @id @default(uuid())
+  saleId String
+  sale   Sale   @relation(fields: [saleId], references: [id], onDelete: Cascade)
+
+  paymentMethodId String
+  paymentMethod   PaymentMethodConfig @relation(fields: [paymentMethodId], references: [id], onDelete: Restrict)
+
+  amount Decimal @db.Decimal(10, 2)
+
+  @@index([saleId])
+  @@map("sale_payments")
+}
