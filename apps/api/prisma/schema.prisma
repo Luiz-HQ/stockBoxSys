@@ -57,7 +57,7 @@ model User {
 
   name         String
   email        String
-  passwordHash String
+  authUserId   String   @unique // código do usuário lá no Supabase Auth
   role         UserRole @default(OPERATOR)
   active       Boolean  @default(true)
 

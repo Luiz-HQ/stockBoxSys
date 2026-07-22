@@ -1,6 +1,7 @@
 import Fastify from "fastify";
 import 'dotenv/config'
 import { prisma } from "./plugins/prisma";
+import { authRoutes } from "./modules/auth/auth.routes";
 const app = Fastify({
   logger: true, // mostra no terminal o que está acontecendo, ajuda a entender erros
 });
@@ -14,6 +15,8 @@ app.get("/test-db", async () => {
   const tenants = await prisma.tenant.findMany();
   return { tenants };
 });
+
+app.register(authRoutes) // <-- adiciona aqui
 
 // Aqui o servidor começa a "escutar" pedidos numa porta
 const start = async () => {
