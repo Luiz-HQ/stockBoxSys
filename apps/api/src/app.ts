@@ -1,12 +1,12 @@
 import Fastify from "fastify";
-import 'dotenv/config'
+import "dotenv/config";
 import { prisma } from "./plugins/prisma";
 import { authRoutes } from "./modules/auth/auth.routes";
+import { authenticate } from "./middlewares/auth";
 const app = Fastify({
-  logger: true, // mostra no terminal o que está acontecendo, ajuda a entender erros
+  logger: true, // show on terminal all logs and errors
 });
 
-// Uma rota simples só pra testar se está tudo funcionando
 app.get("/", async () => {
   return { status: "ok", message: "Servidor rodando!" };
 });
@@ -16,9 +16,12 @@ app.get("/test-db", async () => {
   return { tenants };
 });
 
-app.register(authRoutes) // <-- adiciona aqui
+app.register(authRoutes);
 
-// Aqui o servidor começa a "escutar" pedidos numa porta
+app.get('/me', { preHandler: authenticate }, async (request) => {
+  return { currentUser: request.currentUser }
+})
+
 const start = async () => {
   try {
     await app.listen({ port: 3333 });
