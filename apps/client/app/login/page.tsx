@@ -6,27 +6,16 @@ import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-// import { registerStore, ApiError } from "@/lib/api";
+// import { loginUser, ApiError } from "@/lib/api";
 
-// Validation schema: the single source of truth for both types and error messages.
-// If a field's rules change (e.g. min password length), this is the only place to edit.
-const cadastroSchema = z
-  .object({
-    storeName: z.string().min(2, "Digite o nome da sua loja."),
-    name: z.string().min(2, "Digite o seu nome."),
-    email: z.string().email("Digite um e-mail válido."),
-    password: z.string().min(6, "A senha precisa ter no mínimo 6 caracteres."),
-    confirmPassword: z.string(),
-  })
-  .refine((data) => data.password === data.confirmPassword, {
-    message: "As senhas não coincidem.",
-    path: ["confirmPassword"],
-  });
+const loginSchema = z.object({
+  email: z.string().email("Digite um e-mail válido."),
+  password: z.string().min(1, "Digite sua senha."),
+});
 
-// Type is inferred straight from the schema, no duplicate interface needed.
-type CadastroFormData = z.infer<typeof cadastroSchema>;
+type LoginFormData = z.infer<typeof loginSchema>;
 
-export default function CadastroPage() {
+export default function LoginPage() {
   const router = useRouter();
   const [serverError, setServerError] = useState<string | null>(null);
 
@@ -34,34 +23,29 @@ export default function CadastroPage() {
     register,
     handleSubmit,
     formState: { errors, isSubmitting },
-  } = useForm<CadastroFormData>({
-    resolver: zodResolver(cadastroSchema),
+  } = useForm<LoginFormData>({
+    resolver: zodResolver(loginSchema),
   });
 
   /*
-  async function onSubmit(data: CadastroFormData) {
+
+  async function onSubmit(data: LoginFormData) {
     setServerError(null);
     try {
-      const { accessToken } = await registerStore({
-        storeName: data.storeName,
-        name: data.name,
-        email: data.email,
-        password: data.password,
-      });
-*
+      const { accessToken } = await loginUser(data);
+
       // TODO: replace with the Context API auth provider once it's built.
-      // For now, storing the token is enough to move forward.
       localStorage.setItem("stockbox_token", accessToken);
       router.push("/estoque");
     } catch (err) {
       if (err instanceof ApiError) {
         setServerError(err.message);
       } else {
-        setServerError("Não foi possível criar a loja. Tente novamente.");
+        setServerError("Não foi possível entrar. Tente novamente.");
       }
     }
-  }
-*/
+  } */
+
   return (
     <div className="flex min-h-screen">
       {/* Brand panel */}
@@ -70,20 +54,20 @@ export default function CadastroPage() {
 
         <div>
           <h1 className="font-serif text-4xl leading-tight">
-            Sua loja,
+            Bom te ver
             <br />
-            organizada do jeito certo.
+            de novo.
           </h1>
           <p className="mt-4 max-w-sm text-[#F3D5C9]">
-            Estoque e caixa em um só lugar, feito pra quem vende todo dia e
-            não tem tempo a perder com sistema complicado.
+            Entre pra continuar cuidando do estoque e fechando as vendas do
+            dia.
           </p>
         </div>
 
         <p className="text-sm text-[#D89D8A]">
-          Já vende com a gente?{" "}
-          <Link href="/login" className="underline underline-offset-4">
-            Entrar
+          Ainda não tem uma loja aqui?{" "}
+          <Link href="/" className="underline underline-offset-4">
+            Criar minha loja
           </Link>
         </p>
       </div>
@@ -91,32 +75,16 @@ export default function CadastroPage() {
       {/* Form panel */}
       <div className="flex w-full flex-col justify-center bg-[#FDF6F0] px-6 py-16 lg:w-3/5">
         <div className="mx-auto w-full max-w-sm">
-          <h2 className="font-serif text-3xl text-[#3A2419]">
-            Criar sua loja
-          </h2>
+          <h2 className="font-serif text-3xl text-[#3A2419]">Entrar</h2>
           <p className="mt-2 text-sm text-[#7A6A60]">
-            Leva menos de dois minutos.
+            Use o e-mail e a senha da sua loja.
           </p>
 
           <form
-            onSubmit={handleSubmit(() => undefined)} //solve this 
+            onSubmit={handleSubmit(() => undefined)} //solve this
             className="mt-10 space-y-6"
             noValidate
           >
-            <Field
-              label="Nome da loja"
-              error={errors.storeName?.message}
-              inputProps={register("storeName")}
-              placeholder="Doceria da Ana"
-            />
-
-            <Field
-              label="Seu nome"
-              error={errors.name?.message}
-              inputProps={register("name")}
-              placeholder="Ana Souza"
-            />
-
             <Field
               label="E-mail"
               type="email"
@@ -132,13 +100,6 @@ export default function CadastroPage() {
               inputProps={register("password")}
             />
 
-            <Field
-              label="Confirmar senha"
-              type="password"
-              error={errors.confirmPassword?.message}
-              inputProps={register("confirmPassword")}
-            />
-
             {serverError && (
               <p className="text-sm text-[#B3261E]" role="alert">
                 {serverError}
@@ -150,14 +111,14 @@ export default function CadastroPage() {
               disabled={isSubmitting}
               className="w-full rounded-none bg-[#7A1F3D] py-3 text-sm font-medium text-[#FDF3ED] transition-colors hover:bg-[#5F1830] disabled:opacity-60"
             >
-              {isSubmitting ? "Criando loja..." : "Criar minha loja"}
+              {isSubmitting ? "Entrando..." : "Entrar"}
             </button>
           </form>
 
           <p className="mt-8 text-sm text-[#7A6A60] lg:hidden">
-            Já vende com a gente?{" "}
-            <Link href="/login" className="text-[#7A1F3D] underline underline-offset-4">
-              Entrar
+            Ainda não tem uma loja aqui?{" "}
+            <Link href="/cadastro" className="text-[#7A1F3D] underline underline-offset-4">
+              Criar minha loja
             </Link>
           </p>
         </div>
@@ -166,8 +127,8 @@ export default function CadastroPage() {
   );
 }
 
-// Small local component: underline-style input instead of a boxed card input,
-// consistent with the rest of the page.
+// Same underline-style Field used on the cadastro page, kept local here too.
+// If a third form shows up, this is the signal to move it to components/forms/Field.tsx.
 function Field({
   label,
   error,
